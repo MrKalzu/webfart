@@ -56,6 +56,9 @@ webfart/
 # Compile all binaries to bin/ (forum, forumctl, merkleverify)
 make build
 
+# Cross-compile for aarch64 (ARM64) to bin/aarch64/
+make aarch64
+
 # Run unit, integration, 2000-worker concurrency, and 15MB pruning tests
 make test
 ```
@@ -146,18 +149,66 @@ All block headers, hash chains, and Merkle roots verified successfully!
 
 ---
 
-## Production Deployment (systemd)
+## Production Deployment
+
+### Option A: Bare Metal / VM (systemd)
 
 A hardened systemd unit file is provided at [`systemd/forum.service`](systemd/forum.service):
 
 ```bash
-# Copy binary and assets
-sudo cp bin/forum /usr/local/bin/
+# 1. Create system user
+sudo useradd -r -s /usr/sbin/nologin forum
+
+# 2. Install binaries and web assets
+sudo cp bin/forum bin/forumctl bin/merkleverify /usr/local/bin/
 sudo mkdir -p /usr/local/share/forum/web/static
 sudo cp web/static/* /usr/local/share/forum/web/static/
 
-# Install systemd service
+# 3. Create persistent data directory
+sudo mkdir -p /var/lib/forum/threads
+sudo chown -R forum:forum /var/lib/forum
+
+# 4. Install and start systemd service
 sudo cp systemd/forum.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now forum
+```
+
+### Option B: Docker / Container
+
+```bash
+# Build and run with Docker Compose
+docker compose up -d
+```
+
+### Reverse Proxy (Caddy or Nginx)
+
+For HTTPS and live SSE streams, terminate TLS with Caddy or Nginx.
+
+**Caddyfile:**
+```caddy
+forum.yourdomain.com {
+    reverse_proxy localhost:8080
+}
+```
+
+**Nginx:**
+```nginx
+server {
+    server_name forum.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+
+        # Disable buffering for Server-Sent Events (SSE)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 24h;
+    }
+}
 ```

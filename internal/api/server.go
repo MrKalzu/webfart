@@ -4,10 +4,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +20,10 @@ type ServerConfig struct {
 	MasterSecret []byte
 	TripKey      []byte
 	PoWKey       []byte
-	StaticDir    string
+	// StaticDir is used in dev mode (served from disk). Ignored when StaticFS is set.
+	StaticDir string
+	// StaticFS is used in embedded/deployment mode. Takes precedence over StaticDir.
+	StaticFS     fs.FS
 	TrustedProxy string
 }
 
@@ -67,8 +69,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/pubkey", s.handleAPIPubKey)
 	s.mux.HandleFunc("/api/", s.handleAPIRouter)
 
-	// Static assets
-	s.mux.HandleFunc("/static/", s.handleStatic)
+	// Static assets — served from embedded FS or from disk
+	if s.cfg.StaticFS != nil {
+		s.mux.Handle("/static/", http.StripPrefix("/static/", applySecurityMiddleware(http.FileServerFS(s.cfg.StaticFS))))
+	} else {
+		s.mux.HandleFunc("/static/", s.handleStaticDisk)
+	}
 
 	// Frontend page router
 	s.mux.HandleFunc("/", s.handleFrontend)
@@ -129,7 +135,7 @@ func (s *Server) handleAPIPubKey(w http.ResponseWriter, r *http.Request) {
 	pubHex := hex.EncodeToString(s.mgr.PublicKey())
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"algorithm": "ed25519",
+		"algorithm":  "ed25519",
 		"public_key": pubHex,
 	})
 }
@@ -274,26 +280,23 @@ func (s *Server) handlePostThread(w http.ResponseWriter, r *http.Request, thread
 	_ = json.NewEncoder(w).Encode(msg)
 }
 
-func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+// handleStaticDisk serves static files from the disk path (dev mode).
+func (s *Server) handleStaticDisk(w http.ResponseWriter, r *http.Request) {
 	relPath := strings.TrimPrefix(r.URL.Path, "/static/")
-	filePath := filepath.Join(s.cfg.StaticDir, relPath)
 
 	// Prevent path traversal
-	cleanPath := filepath.Clean(filePath)
-	cleanStaticDir := filepath.Clean(s.cfg.StaticDir)
-	if !strings.HasPrefix(cleanPath, cleanStaticDir) {
+	if strings.Contains(relPath, "..") {
 		http.NotFound(w, r)
 		return
 	}
 
+	applySecurityHeaders(w)
 	if strings.HasSuffix(relPath, ".css") {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	} else if strings.HasSuffix(relPath, ".js") {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	}
-
-	applySecurityHeaders(w)
-	http.ServeFile(w, r, filePath)
+	http.ServeFile(w, r, strings.Join([]string{s.cfg.StaticDir, relPath}, "/"))
 }
 
 func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
@@ -303,17 +306,31 @@ func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	indexPath := filepath.Join(s.cfg.StaticDir, "index.html")
-	content, err := os.ReadFile(indexPath)
-	if err != nil {
-		http.Error(w, "index.html not found", http.StatusInternalServerError)
+	applySecurityHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if s.cfg.StaticFS != nil {
+		// Serve index.html from embedded FS
+		content, err := fs.ReadFile(s.cfg.StaticFS, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found in embedded assets", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(content)
 		return
 	}
 
-	applySecurityHeaders(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(content)
+	// Serve index.html from disk (dev mode)
+	http.ServeFile(w, r, strings.Join([]string{s.cfg.StaticDir, "index.html"}, "/"))
+}
+
+// applySecurityMiddleware wraps a handler to add security headers.
+func applySecurityMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applySecurityHeaders(w)
+		h.ServeHTTP(w, r)
+	})
 }
 
 func applySecurityHeaders(w http.ResponseWriter) {

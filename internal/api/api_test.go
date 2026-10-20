@@ -92,14 +92,14 @@ func TestAPIRoutingAndValidation(t *testing.T) {
 		t.Fatalf("expected 400 for invalid UTF-8, got %d", w.Code)
 	}
 
-	// 4. Message with < 4 non-whitespace code points rejected with 400
-	req = httptest.NewRequest(http.MethodPost, "/api/h", strings.NewReader(`{"message": "  ab  "}`))
+	// 4. Message with < 2 non-whitespace code points rejected with 400
+	req = httptest.NewRequest(http.MethodPost, "/api/h", strings.NewReader(`{"message": "  a  "}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "10.0.0.3:1234"
 	w = httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for < 4 chars, got %d", w.Code)
+		t.Fatalf("expected 400 for < 2 chars, got %d", w.Code)
 	}
 
 	// 5. Message > 1024 bytes rejected with 400

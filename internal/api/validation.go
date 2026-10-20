@@ -60,7 +60,7 @@ func SanitizeMessage(raw string) (string, error) {
 	// Any run of 4 or more newlines becomes \n\n.
 	s = emptyLineCollapseRegex.ReplaceAllString(s, "\n\n")
 
-	// 5. Minimum 4 non-whitespace Unicode code points
+	// 5. Minimum 2 non-whitespace Unicode code points
 	nonWsCount := 0
 	for _, r := range s {
 		if !unicode.IsSpace(r) {

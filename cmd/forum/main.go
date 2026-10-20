@@ -65,14 +65,19 @@ func loadOrGenerateSecret(path string, size int) ([]byte, error) {
 func main() {
 	listenAddr := flag.String("listen", ":8080", "HTTP listen address")
 	dataDir := flag.String("data", "./threads", "Directory for thread databases")
-	staticDir := flag.String("static", "./web/static", "Directory for frontend static assets")
+	staticDir := flag.String("static", "./web/static", "Directory for frontend static assets (dev mode only, ignored when built with -tags deploy)")
 	sockPath := flag.String("sock", "/run/forum/admin.sock", "Path to admin unix domain socket")
 	rateLimitSec := flag.Int("rate-limit", 10, "Minimum seconds between posts per IP")
 	powThreshold := flag.Int("pow-threshold", 10, "Post rate in 5s to trigger Hashcash")
 	forcePoW := flag.Bool("force-pow", false, "Force Hashcash proof-of-work on all posts")
 	flag.Parse()
 
-	log.Println("Starting Ephemeral Forum Server...")
+	embeddedAssets := staticFS()
+	if embeddedAssets != nil {
+		log.Println("Starting Ephemeral Forum Server... [assets: embedded in binary]")
+	} else {
+		log.Printf("Starting Ephemeral Forum Server... [assets: disk at %s]", *staticDir)
+	}
 
 	// 1. Secrets & Keys
 	keyPath := filepath.Join(*dataDir, "server.key")
@@ -130,6 +135,7 @@ func main() {
 		TripKey:      tripKey,
 		PoWKey:       powKey,
 		StaticDir:    *staticDir,
+		StaticFS:     embeddedAssets,
 	}
 	apiHandler := api.NewServer(cfg, mgr, powEngine, rl)
 
@@ -145,7 +151,11 @@ func main() {
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Listening on HTTP %s (data: %s, static: %s)", *listenAddr, *dataDir, *staticDir)
+		if embeddedAssets != nil {
+			log.Printf("Listening on HTTP %s (data: %s, assets: embedded)", *listenAddr, *dataDir)
+		} else {
+			log.Printf("Listening on HTTP %s (data: %s, static: %s)", *listenAddr, *dataDir, *staticDir)
+		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
