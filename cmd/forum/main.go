@@ -67,6 +67,7 @@ func main() {
 	dataDir := flag.String("data", "./threads", "Directory for thread databases")
 	staticDir := flag.String("static", "./web/static", "Directory for frontend static assets")
 	sockPath := flag.String("sock", "/run/forum/admin.sock", "Path to admin unix domain socket")
+	rateLimitSec := flag.Int("rate-limit", 10, "Minimum seconds between posts per IP")
 	powThreshold := flag.Int("pow-threshold", 10, "Post rate in 5s to trigger Hashcash")
 	forcePoW := flag.Bool("force-pow", false, "Force Hashcash proof-of-work on all posts")
 	flag.Parse()
@@ -102,11 +103,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed initializing Storage Manager: %v", err)
 	}
-	defer mgr.Close()
 
 	// 3. PoW Engine & Rate Limiter
 	powEngine := pow.NewPoWEngine(powKey, 16)
-	rl := api.NewRateLimiter(*powThreshold)
+	rl := api.NewRateLimiter(*rateLimitSec, *powThreshold)
 	if *forcePoW {
 		rl.SetForcePoW(true)
 	}
@@ -123,7 +123,6 @@ func main() {
 			log.Fatalf("Failed initializing admin socket: %v", err)
 		}
 	}
-	defer adminSrv.Close()
 
 	// 5. HTTP API Server
 	cfg := api.ServerConfig{
@@ -155,10 +154,16 @@ func main() {
 	<-shutdownChan
 	log.Println("Shutting down gracefully...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 1. Terminate all active SSE streams so HTTP Shutdown does not block
+	apiHandler.Close()
+
+	// 2. Shut down HTTP listener and wait for pending short requests
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	_ = httpServer.Shutdown(ctx)
+
+	// 3. Close admin socket and storage engine (flushes WAL & open blocks)
 	adminSrv.Close()
 	mgr.Close()
 	log.Println("Shutdown complete.")

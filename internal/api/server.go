@@ -53,6 +53,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// Close shuts down background handlers and active SSE streams.
+func (s *Server) Close() {
+	if s.sseManager != nil {
+		s.sseManager.Close()
+	}
+}
+
 func (s *Server) registerRoutes() {
 	// API routes
 	s.mux.HandleFunc("/api/index", s.handleAPIIndex)

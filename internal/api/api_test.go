@@ -40,7 +40,7 @@ func setupTestServer(t *testing.T) (*Server, *storage.Manager, *RateLimiter, *po
 
 	powKey := []byte("test-pow-key")
 	powEngine := pow.NewPoWEngine(powKey, 8) // low difficulty for fast tests
-	rl := NewRateLimiter(100)
+	rl := NewRateLimiter(10, 100)
 
 	cfg := ServerConfig{
 		MasterSecret: []byte("test-master-secret"),

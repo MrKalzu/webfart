@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"webfart/internal/storage"
 )
 
@@ -27,10 +28,11 @@ type AdminResponse struct {
 
 // AdminServer listens on a Unix domain socket for administrative control commands.
 type AdminServer struct {
-	sockPath string
-	listener net.Listener
-	mgr      *storage.Manager
-	quit     chan struct{}
+	sockPath  string
+	listener  net.Listener
+	mgr       *storage.Manager
+	quit      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewAdminServer starts the Unix domain socket server.
@@ -131,11 +133,13 @@ func sendAdminResp(conn net.Conn, ok bool, errMsg string) {
 	_, _ = conn.Write(append(data, '\n'))
 }
 
-// Close terminates the Unix domain socket server and removes the socket file.
+// Close terminates the Unix domain socket server and removes the socket file idempotently.
 func (as *AdminServer) Close() {
-	close(as.quit)
-	if as.listener != nil {
-		_ = as.listener.Close()
-	}
-	_ = os.Remove(as.sockPath)
+	as.closeOnce.Do(func() {
+		close(as.quit)
+		if as.listener != nil {
+			_ = as.listener.Close()
+		}
+		_ = os.Remove(as.sockPath)
+	})
 }

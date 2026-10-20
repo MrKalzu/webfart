@@ -10,20 +10,25 @@ import (
 type RateLimiter struct {
 	mu           sync.Mutex
 	lastPostByIP map[string]int64
+	interval     int64 // minimum seconds between posts per IP
 
 	// Global post tracking for adaptive PoW
-	globalPosts []int64
+	globalPosts  []int64
 	powThreshold int // posts per 5 seconds to trigger PoW
 	forcePoW     bool
 }
 
-// NewRateLimiter creates a RateLimiter.
-func NewRateLimiter(powThreshold int) *RateLimiter {
+// NewRateLimiter creates a RateLimiter with configurable post interval and PoW load threshold.
+func NewRateLimiter(intervalSeconds, powThreshold int) *RateLimiter {
+	if intervalSeconds <= 0 {
+		intervalSeconds = 10 // default 10 seconds between posts
+	}
 	if powThreshold <= 0 {
 		powThreshold = 10 // 10 posts in 5 seconds (~2 posts/sec) triggers Hashcash
 	}
 	rl := &RateLimiter{
 		lastPostByIP: make(map[string]int64),
+		interval:     int64(intervalSeconds),
 		powThreshold: powThreshold,
 	}
 	go rl.cleanupLoop()
@@ -62,8 +67,8 @@ func (rl *RateLimiter) CheckLimit(clientIP string) (allowed bool, retryAfter int
 	last, exists := rl.lastPostByIP[truncIP]
 	if exists {
 		elapsed := now - last
-		if elapsed < 10 {
-			return false, int(10 - elapsed)
+		if elapsed < rl.interval {
+			return false, int(rl.interval - elapsed)
 		}
 	}
 

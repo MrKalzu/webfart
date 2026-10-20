@@ -58,6 +58,7 @@ type ThreadActor struct {
 	subscribers   map[chan Message]struct{}
 
 	lastPostTime time.Time
+	closeOnce    sync.Once
 }
 
 // NewThreadActor creates and starts a ThreadActor for the given thread.
@@ -504,11 +505,13 @@ func (a *ThreadActor) Seal(force bool) error {
 	return <-respChan
 }
 
-// Close shuts down the actor.
+// Close shuts down the actor idempotently.
 func (a *ThreadActor) Close() {
-	done := make(chan struct{})
-	a.closeChan <- done
-	<-done
+	a.closeOnce.Do(func() {
+		done := make(chan struct{})
+		a.closeChan <- done
+		<-done
+	})
 }
 
 // GetAnchor returns the current chain anchor hex string from meta.

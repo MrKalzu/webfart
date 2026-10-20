@@ -67,8 +67,8 @@ func SanitizeMessage(raw string) (string, error) {
 			nonWsCount++
 		}
 	}
-	if nonWsCount < 4 {
-		return "", errors.New("message must contain at least 4 non-whitespace characters")
+	if nonWsCount < 2 {
+		return "", errors.New("message must contain at least 2 non-whitespace characters")
 	}
 
 	// 6. Byte boundary enforcement (<= 1024 bytes)

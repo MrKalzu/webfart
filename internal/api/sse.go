@@ -19,6 +19,9 @@ type SSEManager struct {
 
 	maxPerIP     int
 	maxPerThread int
+
+	quit     chan struct{}
+	quitOnce sync.Once
 }
 
 // NewSSEManager creates an SSE manager with concurrency caps.
@@ -34,7 +37,15 @@ func NewSSEManager(maxPerIP, maxPerThread int) *SSEManager {
 		threadCounts: make(map[string]int),
 		maxPerIP:     maxPerIP,
 		maxPerThread: maxPerThread,
+		quit:         make(chan struct{}),
 	}
+}
+
+// Close signals all active SSE connections to close immediately.
+func (sm *SSEManager) Close() {
+	sm.quitOnce.Do(func() {
+		close(sm.quit)
+	})
 }
 
 func (sm *SSEManager) acquire(clientIP, thread string) bool {
@@ -132,6 +143,9 @@ func (sm *SSEManager) HandleSSE(w http.ResponseWriter, r *http.Request, thread s
 	for {
 		select {
 		case <-notify:
+			return
+
+		case <-sm.quit:
 			return
 
 		case <-heartbeatTicker.C:
