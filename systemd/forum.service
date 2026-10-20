@@ -1,0 +1,33 @@
+[Unit]
+Description=Ephemeral Forum Service
+After=network.target
+
+[Service]
+Type=simple
+User=forum
+Group=forum
+ExecStart=/usr/local/bin/forum \
+  -listen :8080 \
+  -data /var/lib/forum/threads \
+  -static /usr/local/share/forum/web/static \
+  -sock /run/forum/admin.sock
+Restart=always
+RestartSec=3
+
+# Directory management
+RuntimeDirectory=forum
+StateDirectory=forum
+
+# Hardening & Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

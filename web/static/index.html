@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Ephemeral Forum</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app-container">
+    <header>
+      <nav class="nav-threads" id="threads-nav"></nav>
+      <div class="thread-indicator" id="current-thread-label">/h/</div>
+    </header>
+
+    <div id="messages-viewport">
+      <div id="unread-pill">New messages ↓</div>
+      <div id="messages-list"></div>
+    </div>
+
+    <form id="post-bar" autocomplete="off">
+      <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32">
+      <input type="text" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required>
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+    <div id="status-line">
+      <span id="anchor-info">Anchor: 00000000...</span>
+      <span id="stream-status">Connecting...</span>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
