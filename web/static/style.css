@@ -81,6 +81,13 @@ header {
   letter-spacing: 0.5px;
 }
 
+/* JSON Syntax Highlighting */
+.json-key     { color: var(--accent-blue); font-weight: 600; }
+.json-string  { color: #98c379; } /* Soft green */
+.json-number  { color: #d19a66; } /* Warm orange */
+.json-boolean { color: #c678dd; } /* Purple */
+.json-null    { color: #e06c75; } /* Red/Coral */
+
 #messages-viewport {
   flex: 1 1 auto;
   overflow-y: auto;

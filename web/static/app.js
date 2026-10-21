@@ -52,6 +52,42 @@
     return d;
   }
 
+  function highlightJSON(jsonStr, container) {
+    // Matches: 1: strings (with optional trailing colon for keys), 2: booleans/null, 3: numbers
+    const jsonRegex = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g;
+    let lastIdx = 0, match;
+
+    while ((match = jsonRegex.exec(jsonStr)) !== null) {
+      if (match.index > lastIdx) {
+        container.appendChild(document.createTextNode(jsonStr.substring(lastIdx, match.index)));
+      }
+
+      if (match[1]) {
+        if (match[2]) {
+          // Key name
+          container.appendChild(dom("span", "json-key", match[1]));
+          container.appendChild(document.createTextNode(match[2]));
+        } else {
+          // String value
+          container.appendChild(dom("span", "json-string", match[1]));
+        }
+      } else if (match[3]) {
+        // Boolean or null
+        const cls = match[3] === "null" ? "json-null" : "json-boolean";
+        container.appendChild(dom("span", cls, match[3]));
+      } else {
+        // Number
+        container.appendChild(dom("span", "json-number", match[0]));
+      }
+
+      lastIdx = jsonRegex.lastIndex;
+    }
+
+    if (lastIdx < jsonStr.length) {
+      container.appendChild(document.createTextNode(jsonStr.substring(lastIdx)));
+    }
+  }
+
   function parseInline(text, container) {
     // Matches: 1: >>seq | 2: URLs | 3: `inline code` | 4: **bold**
     const tokenRegex = /(>>\d+)|(https?:\/\/[^\s<]+[^<.,:;"')\]\s])|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)/g;
@@ -92,25 +128,39 @@
   }
 
   function renderMicroMarkdown(text, container) {
+
     const lines = text.split("\n");
     let inCodeBlock = false;
     let codeBuffer = [];
+    let codeLang = ""; // <-- Track language
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Code block boundary: ```
+      // Code block toggle: ``` or ```json
       if (line.trim().startsWith("```")) {
         if (inCodeBlock) {
-          // Close block
+          // Closing code block
           const pre = dom("pre", "md-code-block");
-          pre.appendChild(dom("code", null, codeBuffer.join("\n")));
+          const code = dom("code", null);
+          const rawCode = codeBuffer.join("\n");
+
+          // If marked as ```json (or if it looks like JSON)
+          if (codeLang === "json" || (rawCode.trim().startsWith("{") && rawCode.trim().endsWith("}"))) {
+            highlightJSON(rawCode, code);
+          } else {
+            code.textContent = rawCode;
+          }
+
+          pre.appendChild(code);
           container.appendChild(pre);
           codeBuffer = [];
+          codeLang = "";
           inCodeBlock = false;
         } else {
-          // Open block
+          // Opening code block: read tag like ```json
           inCodeBlock = true;
+          codeLang = line.trim().slice(3).trim().toLowerCase();
         }
         continue;
       }
