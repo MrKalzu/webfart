@@ -52,6 +52,101 @@
     return d;
   }
 
+  function parseInline(text, container) {
+    // Matches: 1: >>seq | 2: URLs | 3: `inline code` | 4: **bold**
+    const tokenRegex = /(>>\d+)|(https?:\/\/[^\s<]+[^<.,:;"')\]\s])|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)/g;
+    let lastIdx = 0, match;
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        container.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
+      }
+
+      if (match[1]) {
+        // >>123 quote link
+        const qLink = dom("a", "quote-link", match[1]);
+        qLink.href = "#m" + match[1].substring(2);
+        container.appendChild(qLink);
+      } else if (match[2]) {
+        // http(s):// clickable link
+        const url = match[2];
+        const a = dom("a", "url-link", url);
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer"; // Security against reverse tabnabbing
+        container.appendChild(a);
+      } else if (match[3]) {
+        // `inline code`
+        container.appendChild(dom("code", "inline-code", match[3].slice(1, -1)));
+      } else if (match[4]) {
+        // **bold**
+        container.appendChild(dom("strong", "md-bold", match[4].slice(2, -2)));
+      }
+
+      lastIdx = tokenRegex.lastIndex;
+    }
+
+    if (lastIdx < text.length) {
+      container.appendChild(document.createTextNode(text.substring(lastIdx)));
+    }
+  }
+
+  function renderMicroMarkdown(text, container) {
+    const lines = text.split("\n");
+    let inCodeBlock = false;
+    let codeBuffer = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Code block boundary: ```
+      if (line.trim().startsWith("```")) {
+        if (inCodeBlock) {
+          // Close block
+          const pre = dom("pre", "md-code-block");
+          pre.appendChild(dom("code", null, codeBuffer.join("\n")));
+          container.appendChild(pre);
+          codeBuffer = [];
+          inCodeBlock = false;
+        } else {
+          // Open block
+          inCodeBlock = true;
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeBuffer.push(line);
+        continue;
+      }
+
+      // Headers: #, ##, ###
+      const headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
+      if (headerMatch) {
+        const level = headerMatch[1].length;
+        const headerEl = dom("div", "md-header md-h" + level);
+        parseInline(headerMatch[2], headerEl);
+        container.appendChild(headerEl);
+        continue;
+      }
+
+      // Standard line
+      const lineDiv = dom("div", "md-line");
+      if (line.length > 0) {
+        parseInline(line, lineDiv);
+      }
+      container.appendChild(lineDiv);
+    }
+
+    // Flush any unclosed code blocks
+    if (inCodeBlock && codeBuffer.length > 0) {
+      const pre = dom("pre", "md-code-block");
+      pre.appendChild(dom("code", null, codeBuffer.join("\n")));
+      container.appendChild(pre);
+    }
+  }
+
+
   function createMessageElement(msg) {
     const card = dom("div", "message-card");
     card.id = "m" + msg.seq;
@@ -81,21 +176,7 @@
     if (msg.body === null || msg.body === undefined) {
       bodyDiv.appendChild(dom("span", "deleted-text", "[message tombstoned]"));
     } else {
-      const quoteRegex = />>(\d+)/g;
-      let lastIdx = 0, match;
-      const text = msg.body;
-      while ((match = quoteRegex.exec(text)) !== null) {
-        if (match.index > lastIdx) {
-          bodyDiv.appendChild(document.createTextNode(text.substring(lastIdx, match.index)));
-        }
-        const qLink = dom("a", "quote-link", ">>" + match[1]);
-        qLink.href = "#m" + match[1];
-        bodyDiv.appendChild(qLink);
-        lastIdx = quoteRegex.lastIndex;
-      }
-      if (lastIdx < text.length) {
-        bodyDiv.appendChild(document.createTextNode(text.substring(lastIdx)));
-      }
+      renderMicroMarkdown(msg.body, bodyDiv);
     }
     card.appendChild(bodyDiv);
     return card;
@@ -202,6 +283,17 @@
       if (ctr % 4000 === 0) await new Promise(function(r) { setTimeout(r, 0); });
     }
   }
+  // Handle Enter to send, Shift+Enter for new line
+  msgInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (typeof postBar.requestSubmit === "function") {
+        postBar.requestSubmit();
+      } else {
+        sendBtn.click();
+      }
+    }
+  });
 
   postBar.addEventListener("submit", async function(e) {
     e.preventDefault();

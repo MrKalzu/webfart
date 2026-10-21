@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Ephemeral Forum</title>
+  <title>Webfart Forum</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
 
     <form id="post-bar" autocomplete="off">
       <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32">
-      <input type="text" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required>
+      <textarea rows="3" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required> </textarea>
       <button type="submit" id="send-btn">Send</button>
     </form>
     <div id="status-line">

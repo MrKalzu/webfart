@@ -1,5 +1,7 @@
 # Ephemeral Forum (`webfart`)
 
+!! Yes, this is AI slob !! :)
+
 A high-throughput, minimalist, text-only discussion board combining the simplicity of early message boards with verifiable cryptographic auditability and isolated per-thread concurrency.
 
 ---
