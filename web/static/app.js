@@ -4,6 +4,50 @@
   const HOME_ROW = ["a", "s", "d", "f", "g", "h", "j", "k", "l"];
   let curThread = "h", latestSeq = 0, eventSource = null, pollInterval = null;
   const seenSeqs = new Set();
+  
+  const BASE_TITLE = "Webfart Forum";
+  let unreadReplies = 0;
+  let isInitialLoad = true;
+  let mySeqs = new Set();
+
+  function loadMySeqs() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem("wf_my_seqs_" + curThread) || "[]");
+      mySeqs = new Set(stored);
+    } catch (e) {
+      mySeqs = new Set();
+    }
+  }
+
+  function recordMySeq(seq) {
+    mySeqs.add(seq);
+    try {
+      sessionStorage.setItem("wf_my_seqs_" + curThread, JSON.stringify(Array.from(mySeqs)));
+    } catch (e) {}
+  }
+
+  function updateTitle() {
+    if (unreadReplies > 0) {
+      document.title = "(" + unreadReplies + ") /" + curThread + "/ - " + BASE_TITLE;
+    } else {
+      document.title = "/" + curThread + "/ - " + BASE_TITLE;
+    }
+  }
+
+  function quotesMe(msg) {
+    if (!msg.body || mySeqs.size === 0) return false;
+    // Don't notify if you quoted yourself in your own post
+    if (mySeqs.has(msg.seq)) return false;
+
+    const quoteRegex = />>(\d+)/g;
+    let match;
+    while ((match = quoteRegex.exec(msg.body)) !== null) {
+      if (mySeqs.has(parseInt(match[1], 10))) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   const viewport = document.getElementById("messages-viewport");
   const messagesList = document.getElementById("messages-list");
@@ -16,6 +60,40 @@
   const curLabel = document.getElementById("current-thread-label");
   const anchorInfo = document.getElementById("anchor-info");
   const streamStatus = document.getElementById("stream-status");
+  const byteCounter = document.getElementById("byte-counter");
+  const enc = new TextEncoder();
+  
+  msgInput.addEventListener("input", function() {
+    const bytes = enc.encode(msgInput.value).length;
+    byteCounter.textContent = bytes + "/1024 B";
+    if (bytes > 1024) {
+      byteCounter.style.color = "#e06c75"; // Red
+      sendBtn.disabled = true;
+    } else if (bytes > 900) {
+      byteCounter.style.color = "#d19a66"; // Amber warning
+      sendBtn.disabled = false;
+    } else {
+      byteCounter.style.color = "var(--text-muted)";
+      sendBtn.disabled = false;
+    }
+  });
+
+  function startCooldown(seconds) {
+    let remaining = seconds;
+    sendBtn.disabled = true;
+    sendBtn.textContent = remaining + "s";
+    const timer = setInterval(function() {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(timer);
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send";
+      } else {
+        sendBtn.textContent = remaining + "s";
+      }
+    }, 1000);
+  }
+
 
   function getThreadFromPath() {
     const p = window.location.pathname.replace(/^\/|\/$/g, "");
@@ -362,6 +440,7 @@
         body: JSON.stringify(payload)
       });
       if (res.status === 201) {
+        startCooldown(1);
         appendMessage(await res.json());
         msgInput.value = "";
         return true;

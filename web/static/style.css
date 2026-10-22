@@ -92,11 +92,14 @@ header {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   scroll-behavior: smooth;
   position: relative;
+}
+
+#messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* Small gap between messages */
 }
 
 .message-card {
@@ -241,8 +244,24 @@ header {
   align-items: flex-end;
 }
 
-#nick-input {
+/* Nick column containing byte counter + nick input */
+.nick-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   width: 140px;
+  flex-shrink: 0;
+}
+
+#byte-counter {
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+  font-family: var(--mono-font);
+}
+
+#nick-input {
+  width: 100%;
   padding: 8px 10px;
   background: #18191c;
   border: 1px solid var(--border-color);
@@ -295,14 +314,8 @@ header {
 #status-line {
   font-size: 11px;
   color: var(--text-muted);
-  padding: 2px 14px 6px 14px;
+  padding: 4px 14px 6px 14px;
   background: #101114;
   display: flex;
   justify-content: space-between;
-}
-
-#messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px; // Small cap between messages
 }

@@ -19,10 +19,14 @@
     </div>
 
     <form id="post-bar" autocomplete="off">
-      <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32">
-      <textarea rows="3" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required> </textarea>
+      <div class="nick-col">
+        <span id="byte-counter">0/1024 B</span>
+        <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32">
+      </div>
+      <textarea rows="3" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required></textarea>
       <button type="submit" id="send-btn">Send</button>
     </form>
+
     <div id="status-line">
       <span id="anchor-info">Anchor: 00000000...</span>
       <span id="stream-status">Connecting...</span>
