@@ -63,7 +63,12 @@
   const byteCounter = document.getElementById("byte-counter");
   const enc = new TextEncoder();
   
-  msgInput.addEventListener("input", function() {
+  // Touch keyboards have no Shift+Enter, so there Enter must insert a newline
+  // (needed for multi-line code blocks) and the Send button does the sending.
+  const coarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  if (!coarsePointer) msgInput.placeholder = "Write message... (Enter to send)";
+
+  function updateCounter() {
     const bytes = enc.encode(msgInput.value).length;
     byteCounter.textContent = bytes + "/1024 B";
     if (bytes > 1024) {
@@ -76,7 +81,8 @@
       byteCounter.style.color = "var(--text-muted)";
       sendBtn.disabled = false;
     }
-  });
+  }
+  msgInput.addEventListener("input", updateCounter);
 
   function startCooldown(seconds) {
     let remaining = seconds;
@@ -166,6 +172,251 @@
     }
   }
 
+  // ---------------------------------------------------------------------
+  // JSON pretty-printing
+  //
+  // JSON.stringify(JSON.parse(s), null, 2) is the obvious way, but it
+  // rewrites data: integers beyond 2^53 lose digits, 1.0 becomes 1, and
+  // integer-like keys ("2" before "1") get reordered. Instead we validate
+  // with JSON.parse (strict, native) and then only re-indent: every
+  // string/number/literal token is copied through verbatim.
+  // ---------------------------------------------------------------------
+  const PRETTY_WIDTH = 72;
+
+  function prettyJSON(src) {
+    const t = src.match(/"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]/g);
+    let i = 0;
+
+    function parse() {
+      const x = t[i++];
+      if (x === "{") {
+        const items = [];
+        if (t[i] === "}") { i++; return { o: items }; }
+        for (;;) {
+          const k = t[i++]; i++; // key, then ':'
+          items.push([k, parse()]);
+          if (t[i++] === "}") return { o: items };
+        }
+      }
+      if (x === "[") {
+        const items = [];
+        if (t[i] === "]") { i++; return { a: items }; }
+        for (;;) {
+          items.push(parse());
+          if (t[i++] === "]") return { a: items };
+        }
+      }
+      return { v: x };
+    }
+
+    function flat(n) {
+      if (n.v !== undefined) return n.v;
+      if (n.a) return n.a.length ? "[" + n.a.map(flat).join(", ") + "]" : "[]";
+      return n.o.length ? "{" + n.o.map(function(p) { return p[0] + ": " + flat(p[1]); }).join(", ") + "}" : "{}";
+    }
+
+    function out(n, depth) {
+      if (n.v !== undefined) return n.v;
+      const empty = n.a ? !n.a.length : !n.o.length;
+      // Empty containers and short scalar-only arrays stay on one line
+      if (empty || (n.a && n.a.every(function(x) { return x.v !== undefined; }) &&
+                    flat(n).length + depth * 2 <= PRETTY_WIDTH)) {
+        return flat(n);
+      }
+      const inner = "  ".repeat(depth + 1), outer = "  ".repeat(depth);
+      if (n.a) {
+        return "[\n" + n.a.map(function(x) { return inner + out(x, depth + 1); }).join(",\n") + "\n" + outer + "]";
+      }
+      return "{\n" + n.o.map(function(p) { return inner + p[0] + ": " + out(p[1], depth + 1); }).join(",\n") + "\n" + outer + "}";
+    }
+
+    return out(parse(), 0);
+  }
+
+  // Returns display text if `s` is a JSON object/array, else null.
+  // Compact (single-line) JSON is expanded; JSON you already formatted
+  // across several lines is left exactly as written.
+  function tryJSON(s) {
+    const t = s.trim();
+    if (!/^[\[{]/.test(t)) return null;
+    try { JSON.parse(t); } catch (e) { return null; }
+    if (t.indexOf("\n") !== -1) return t;
+    try { return prettyJSON(t); } catch (e) { return t; }
+  }
+
+  // ---------------------------------------------------------------------
+  // Table-driven syntax highlighting
+  //
+  // Each language is a small def: comment / string / extra regex sources,
+  // plus word lists. compile() joins them into ONE regex, one capture group
+  // per source (so sources must use (?:...) only), and highlightCode() walks
+  // the matches. Output is built with textContent only, never innerHTML.
+  // ---------------------------------------------------------------------
+  const EOF = "(?![\\s\\S])";
+  const DQ  = String.raw`"(?:\\.|[^"\\\n])*"?`;          // "..." one line, tolerates a missing close
+  const SQ  = String.raw`'(?:\\.|[^'\\\n])*'?`;
+  const CH  = String.raw`'(?:\\.[^'\n]*|[^'\\\n])'`;      // char literal, so Rust lifetimes etc. survive
+  const BT  = "`[^`]*`?";                                   // backtick string, may span lines
+  const BC  = String.raw`/\*[\s\S]*?(?:\*/|` + EOF + ")";  // /* block comment */
+  const NUM = String.raw`\b(?:0[xX][\da-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)\b`;
+  const HASH = String.raw`(?<![^\s])#.*`;                   // # comment at line start or after whitespace
+
+  const LANGS = new Map();
+  function lang(names, def) {
+    names.split(" ").forEach(function(n) { LANGS.set(n, def); });
+  }
+
+  lang("go golang", {
+    cm: ["//.*", BC], str: [DQ, BT, CH],
+    kw: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var",
+    lit: "true false nil iota",
+    ty: "string int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 bool byte rune error any"
+  });
+
+  lang("py python", {
+    cm: ["#.*"],
+    str: [String.raw`"""[\s\S]*?(?:"""|` + EOF + String.raw`)|'''[\s\S]*?(?:'''|` + EOF + ")", DQ, SQ],
+    x: [["t", String.raw`@\w+(?:\.\w+)*`]],
+    kw: "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case",
+    lit: "True False None"
+  });
+
+  lang("js javascript ts typescript jsx tsx mjs", {
+    cm: ["//.*", BC], str: [DQ, SQ, BT],
+    kw: "async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while with yield interface type enum implements readonly as satisfies",
+    lit: "true false null undefined NaN Infinity",
+    ty: "string number boolean any unknown never object"
+  });
+
+  lang("sh bash shell zsh", {
+    cm: [HASH],
+    str: [String.raw`"(?:\\[\s\S]|[^"\\])*"?`, String.raw`'[^']*'?`],
+    x: [["v", String.raw`\$(?:\w+|\{[^}\n]*\}|[@#?$!*-])`],
+        ["l", String.raw`(?<![\w-])--?[A-Za-z][\w-]*`]],   // command-line options
+    kw: "if then else elif fi for while until do done case esac in function select return exit export local readonly declare unset source alias set shift trap break continue",
+    lit: "true false"
+  });
+
+  lang("sql postgres postgresql psql sqlite mysql", {
+    ci: true,
+    cm: ["--.*", BC],
+    str: [String.raw`'(?:''|[^'])*'?`, String.raw`"[^"\n]*"?`],
+    kw: "select from where and or not in is as on join left right inner outer full cross group by order having limit offset insert into values update set delete create alter drop table index view database schema primary key foreign references unique default check constraint distinct union all intersect except case when then else end exists between like ilike asc desc with returning begin commit rollback transaction explain analyze if cascade add column",
+    lit: "null true false",
+    ty: "int integer bigint smallint text varchar char boolean bool date time timestamp timestamptz serial uuid json jsonb numeric decimal float real double blob"
+  });
+
+  lang("yaml yml", {
+    cm: [HASH], str: [DQ, SQ],
+    x: [["key", String.raw`(?<![^\s])[\w.\-/]+(?=[ \t]*:(?:\s|` + EOF + "))"],
+        ["v", String.raw`[&*][\w-]+`]],                      // anchors and aliases
+    lit: "true false null yes no on off True False"
+  });
+
+  lang("toml ini conf", {
+    cm: [String.raw`(?<![^\s])[#;].*`], str: [DQ, SQ],
+    x: [["t", String.raw`^[ \t]*\[\[?[^\]\n]*\]\]?`],       // [section] / [[table]]
+        ["key", String.raw`^[ \t]*[\w.\-]+(?=[ \t]*=)`]],
+    lit: "true false"
+  });
+
+  lang("nginx", {
+    cm: [HASH], str: [DQ, SQ],
+    x: [["v", String.raw`\$(?:\w+|\{\w+\})`],
+        // directive = first word on a line or right after ; or {
+        ["k", String.raw`(?<=^[ \t]*|[;{][ \t]*)[a-z_]\w*`]],
+    lit: "on off"
+  });
+
+  // Caddyfile: intentionally lightweight highlighting for common directives.
+  lang("caddy caddyfile", {
+    cm: [HASH], str: [DQ, SQ, BT],
+    x: [["v", String.raw`\{[\w.$-]+\}`],
+        ["l", String.raw`@[A-Za-z0-9_-]+`],
+        ["k", String.raw`^[ \t]*[a-z_][\w-]*(?=[ \t]|\{|$)`]],
+    lit: "true false on off"
+  });
+
+  lang("dockerfile docker", {
+    cm: [HASH], str: [DQ, SQ],
+    x: [["k", String.raw`^[ \t]*(?:ADD|ARG|CMD|COPY|ENTRYPOINT|ENV|EXPOSE|FROM|HEALTHCHECK|LABEL|MAINTAINER|ONBUILD|RUN|SHELL|STOPSIGNAL|USER|VOLUME|WORKDIR)(?!\w)`],
+        ["k", String.raw`(?<=\s)AS(?=\s)`],
+        ["v", String.raw`\$(?:\w+|\{[^}\n]*\})`],
+        ["l", String.raw`(?<![\w-])--[a-z][\w-]*`]]
+  });
+
+  lang("html htm xml svg", {
+    cm: [String.raw`<!--[\s\S]*?(?:-->|` + EOF + ")"],
+    str: [String.raw`(?<==)(?:"[^"\n]*"?|'[^'\n]*'?)`],      // attribute values only, so apostrophes in text are safe
+    x: [["t", String.raw`</?[A-Za-z][\w:.-]*`],
+        ["v", String.raw`(?<=[\s"'])[A-Za-z_:@][\w:.@-]*(?=\s*=)`],
+        ["l", String.raw`&#?\w+;`]],
+    num: false
+  });
+
+  lang("diff patch", {
+    lines: [[/^(?:\+\+\+|---|diff |index )/, "meta"], [/^@@/, "hunk"], [/^\+/, "add"], [/^-/, "del"]]
+  });
+
+  function compileLang(d) {
+    const parts = [], cls = [];
+    function add(c, src) { cls.push(c); parts.push("(" + src + ")"); }
+    (d.cm || []).forEach(function(s) { add("c", s); });
+    (d.str || []).forEach(function(s) { add("s", s); });
+    (d.x || []).forEach(function(p) { add(p[0], p[1]); });
+    const words = new Map();
+    [["k", d.kw], ["l", d.lit], ["t", d.ty]].forEach(function(p) {
+      (p[1] || "").split(" ").forEach(function(w) {
+        if (w) words.set(d.ci ? w.toLowerCase() : w, p[0]);
+      });
+    });
+    if (words.size) add("w", String.raw`[A-Za-z_]\w*`);   // identifiers, classified by word list
+    if (d.num !== false) add("n", NUM);
+    d.cls = cls;
+    d.words = words;
+    d.re = new RegExp(parts.join("|"), "gm");
+  }
+
+  function highlightCode(code, container, d) {
+    if (d.lines) {
+      code.split("\n").forEach(function(line, idx) {
+        if (idx > 0) container.appendChild(document.createTextNode("\n"));
+        const rule = d.lines.find(function(r) { return r[0].test(line); });
+        container.appendChild(rule ? dom("span", "hl-" + rule[1], line) : document.createTextNode(line));
+      });
+      return;
+    }
+    if (!d.re) compileLang(d);
+    const re = d.re;
+    re.lastIndex = 0;
+    let last = 0, m;
+    while ((m = re.exec(code)) !== null) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      let gi = 1;
+      while (m[gi] === undefined) gi++;
+      let c = d.cls[gi - 1];
+      if (c === "w") c = d.words.get(d.ci ? m[0].toLowerCase() : m[0]);
+      if (m.index > last) container.appendChild(document.createTextNode(code.substring(last, m.index)));
+      container.appendChild(c ? dom("span", "hl-" + c, m[0]) : document.createTextNode(m[0]));
+      last = re.lastIndex;
+    }
+    if (last < code.length) container.appendChild(document.createTextNode(code.substring(last)));
+  }
+
+  // One entry point for every code block (fenced or bare JSON)
+  function appendCodeBlock(container, raw, langTag) {
+    const pre = dom("pre", "md-code-block");
+    const code = dom("code", null);
+    const json = (!langTag || langTag === "json") ? tryJSON(raw) : null;
+    const def = LANGS.get(langTag);
+    if (json !== null) highlightJSON(json, code);
+    else if (def) highlightCode(raw, code, def);
+    else if (langTag === "json") highlightJSON(raw, code);   // invalid/JSONL: still colour tokens
+    else code.textContent = raw;
+    pre.appendChild(code);
+    container.appendChild(pre);
+  }
+
   function parseInline(text, container) {
     // Matches: 1: >>seq | 2: URLs | 3: `inline code` | 4: **bold**
     const tokenRegex = /(>>\d+)|(https?:\/\/[^\s<]+[^<.,:;"')\]\s])|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)/g;
@@ -205,7 +456,38 @@
     }
   }
 
+  // Detect bare Nginx/Caddy configs only when the whole message is small.
+  // The 1 KiB limit keeps ordinary prose and large messages out of this heuristic.
+  function detectBareConfig(text) {
+    const s = text.trim();
+    if (!s || s.length > 1024) return null;
+
+    // Nginx needs both a recognizable block and at least one directive.
+    const nginxBlock = /^\s*(?:server|http|events|upstream|stream)\s*\{/m.test(s);
+    const nginxDirective = /^\s*(?:listen|server_name|location|proxy_pass|root|try_files|worker_processes|proxy_set_header)\b/m.test(s);
+    if (nginxBlock && nginxDirective) return "nginx";
+
+    // Caddy: a site/address block plus a distinctive Caddy directive.
+    const caddyBlock = /^\s*(?:[\w*.-]+(?::\d+)?|\[[^\]]+\]|:\d+)\s*\{/m.test(s);
+    const caddyDirective = /^\s*(?:reverse_proxy|file_server|php_fastcgi|handle|handle_path|redir|encode|tls|try_files)\b/m.test(s);
+    if (caddyBlock && caddyDirective) return "caddy";
+
+    return null;
+  }
+
   function renderMicroMarkdown(text, container) {
+    // Auto-highlight small, bare Nginx/Caddy configuration messages.
+    const configLang = detectBareConfig(text);
+    if (configLang) {
+      appendCodeBlock(container, text.trim(), configLang);
+      return;
+    }
+
+    // A message that is nothing but a JSON object/array renders as a code block
+    if (/^\s*[\[{]/.test(text) && tryJSON(text) !== null) {
+      appendCodeBlock(container, text, "json");
+      return;
+    }
 
     const lines = text.split("\n");
     let inCodeBlock = false;
@@ -219,26 +501,14 @@
       if (line.trim().startsWith("```")) {
         if (inCodeBlock) {
           // Closing code block
-          const pre = dom("pre", "md-code-block");
-          const code = dom("code", null);
-          const rawCode = codeBuffer.join("\n");
-
-          // If marked as ```json (or if it looks like JSON)
-          if (codeLang === "json" || (rawCode.trim().startsWith("{") && rawCode.trim().endsWith("}"))) {
-            highlightJSON(rawCode, code);
-          } else {
-            code.textContent = rawCode;
-          }
-
-          pre.appendChild(code);
-          container.appendChild(pre);
+          appendCodeBlock(container, codeBuffer.join("\n"), codeLang);
           codeBuffer = [];
           codeLang = "";
           inCodeBlock = false;
         } else {
           // Opening code block: read tag like ```json
           inCodeBlock = true;
-          codeLang = line.trim().slice(3).trim().toLowerCase();
+          codeLang = line.trim().slice(3).trim().toLowerCase().split(/\s+/)[0];
         }
         continue;
       }
@@ -268,9 +538,7 @@
 
     // Flush any unclosed code blocks
     if (inCodeBlock && codeBuffer.length > 0) {
-      const pre = dom("pre", "md-code-block");
-      pre.appendChild(dom("code", null, codeBuffer.join("\n")));
-      container.appendChild(pre);
+      appendCodeBlock(container, codeBuffer.join("\n"), codeLang);
     }
   }
 
@@ -413,7 +681,7 @@
   }
   // Handle Enter to send, Shift+Enter for new line
   msgInput.addEventListener("keydown", function(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !coarsePointer) {
       e.preventDefault();
       if (typeof postBar.requestSubmit === "function") {
         postBar.requestSubmit();
@@ -443,6 +711,7 @@
         startCooldown(1);
         appendMessage(await res.json());
         msgInput.value = "";
+        updateCounter();
         return true;
       }
       if (res.status === 428) {

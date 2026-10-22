@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Webfart Forum</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -13,17 +13,20 @@
       <div class="thread-indicator" id="current-thread-label">/h/</div>
     </header>
 
-    <div id="messages-viewport">
+    <div id="messages-wrap">
+      <div id="messages-viewport">
+        <div id="messages-list"></div>
+      </div>
       <div id="unread-pill">New messages ↓</div>
-      <div id="messages-list"></div>
     </div>
 
     <form id="post-bar" autocomplete="off">
-      <div class="nick-col">
+      <div class="post-meta">
+        <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32"
+               autocapitalize="off" autocorrect="off" spellcheck="false">
         <span id="byte-counter">0/1024 B</span>
-        <input type="text" id="nick-input" placeholder="Nick#Secret" maxlength="32">
       </div>
-      <textarea rows="3" id="msg-input" placeholder="Write message... (Enter to send)" maxlength="1024" required></textarea>
+      <textarea rows="2" id="msg-input" placeholder="Write message..." maxlength="1024" required></textarea>
       <button type="submit" id="send-btn">Send</button>
     </form>
 
