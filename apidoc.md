@@ -172,6 +172,30 @@ Host: example.com
 
 ---
 
+#### `POST /api/tripcode`
+Derives the public display nick and callable tripcode from a `Nick#Secret` string without publishing a message. Secrets are processed exclusively in memory using the server's `trip.secret` and never persisted.
+
+##### Request
+```http
+POST /api/tripcode HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "nick": "alice#mysecretphrase"
+}
+```
+
+##### Response (`200 OK`)
+```json
+{
+  "nick": "alice!3g4kL0",
+  "trip": "!3g4kL0"
+}
+```
+
+---
+
 ### 4.2 Threads & Messaging
 
 ---
@@ -264,6 +288,10 @@ Content-Type: application/json
   "message": "Hello, anonymous forum!"
 }
 ```
+
+##### Response Headers
+* `X-Poster-Nick: <nick>` (e.g., `alice!3g4kL0` or poster `pid`)
+* `X-Poster-Trip: <!trip>` (e.g., `!3g4kL0`, present only when a tripcode secret was supplied)
 
 ##### Response (`201 Created`)
 ```json

@@ -4,12 +4,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 	"webfart/internal/identity"
 	"webfart/internal/pow"
 	"webfart/internal/storage"
@@ -67,6 +69,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/index", s.handleAPIIndex)
 	s.mux.HandleFunc("/api/challenge", s.handleAPIChallenge)
 	s.mux.HandleFunc("/api/pubkey", s.handleAPIPubKey)
+	s.mux.HandleFunc("/api/tripcode", s.handleAPITripcode)
 	s.mux.HandleFunc("/api/", s.handleAPIRouter)
 
 	// Static assets — served from embedded FS or from disk
@@ -137,6 +140,55 @@ func (s *Server) handleAPIPubKey(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"algorithm":  "ed25519",
 		"public_key": pubHex,
+	})
+}
+
+func (s *Server) handleAPITripcode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	rawBody, err := io.ReadAll(io.LimitReader(r.Body, 1024))
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	if !utf8.Valid(rawBody) {
+		http.Error(w, "request body is not valid UTF-8", http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		Nick string `json:"nick"`
+	}
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		http.Error(w, "malformed JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	sanitizedNick, err := SanitizeNick(payload.Nick)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	derivedNick := identity.ParseNick(sanitizedNick, s.cfg.TripKey)
+	trip := ""
+	if idx := strings.Index(derivedNick, "!"); idx != -1 {
+		trip = derivedNick[idx:]
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"nick": derivedNick,
+		"trip": trip,
 	})
 }
 
@@ -275,6 +327,10 @@ func (s *Server) handlePostThread(w http.ResponseWriter, r *http.Request, thread
 	// 6. Record rate limit
 	s.rateLimit.RecordPost(clientIP)
 
+	if idx := strings.Index(nick, "!"); idx != -1 {
+		w.Header().Set("X-Poster-Trip", nick[idx:])
+	}
+	w.Header().Set("X-Poster-Nick", nick)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(msg)
